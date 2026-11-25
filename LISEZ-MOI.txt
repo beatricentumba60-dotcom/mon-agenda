@@ -1,0 +1,91 @@
+MON AGENDA – téléphone Android et ordinateur, tout sur GitHub
+=============================================================
+
+Cette version s’installe comme une vraie application Android.
+Les rappels sonnent MÊME QUAND L’APPLICATION EST FERMÉE,
+et même après un redémarrage du téléphone.
+
+Vous n’avez rien à installer sur votre ordinateur : GitHub construit
+l’application pour vous, gratuitement.
+
+
+ÉTAPE 1 – Créer un compte GitHub (gratuit)
+  Allez sur https://github.com et créez un compte.
+
+ÉTAPE 2 – Créer un dépôt
+  En haut à droite : « + » puis « New repository ».
+  Nom : mon-agenda. Choisissez « Public » (obligatoire pour que la
+  version ordinateur soit gratuite). Seul le code de l’application est
+  public : vos activités restent sur vos appareils, jamais sur GitHub.
+  Cliquez « Create repository ».
+
+ÉTAPE 3 – Envoyer les fichiers
+  Sur la page du dépôt, cliquez « uploading an existing file ».
+  Glissez-y TOUT le contenu du dossier « mon-agenda-android »
+  (les dossiers www, assets, signature et les fichiers package.json,
+  capacitor.config.json, LISEZ-MOI.txt). Cliquez « Commit changes ».
+
+  Attention : le dossier « .github » est souvent caché et ne part pas
+  par glisser-déposer. Créez-le à la main :
+    « Add file » > « Create new file »
+    Nom du fichier : .github/workflows/build-apk.yml
+    Copiez-collez le contenu du fichier build-apk.yml fourni,
+    puis « Commit changes ».
+  Recommencez avec un second fichier :
+    Nom du fichier : .github/workflows/site-ordinateur.yml
+    Contenu : celui du fichier site-ordinateur.yml fourni.
+
+ÉTAPE 4 – Récupérer l’application
+  Ouvrez l’onglet « Actions » du dépôt.
+  La construction démarre seule (environ 5 à 8 minutes).
+  Quand elle est verte ✓, cliquez dessus. En bas, dans « Artifacts »,
+  téléchargez « mon-agenda-apk » : c’est un zip contenant mon-agenda.apk.
+
+ÉTAPE 5 – Installer sur le téléphone
+  Envoyez mon-agenda.apk sur votre téléphone (câble, WhatsApp à
+  vous-même, Google Drive…) et touchez-le.
+  Android demandera d’autoriser l’installation depuis cette source :
+  acceptez (c’est votre propre application).
+  Au premier rappel enregistré, autorisez les notifications.
+  Si un bouton « Rappels à la minute près » apparaît, touchez-le et
+  activez l’option : sinon Android peut retarder un rappel de quelques
+  minutes pour économiser la batterie.
+
+
+ÉTAPE 6 – Activer la version ordinateur
+  Dans le dépôt : « Settings » > « Pages » (menu de gauche).
+  Sous « Build and deployment », Source : choisissez « GitHub Actions ».
+  Puis onglet « Actions » > « Publier la version ordinateur »
+  > « Run workflow ». Après 1 à 2 minutes, l’adresse apparaît dans
+  Settings > Pages, du type :
+      https://VOTRE-NOM.github.io/mon-agenda/
+  Ouvrez-la dans Chrome ou Edge sur l’ordinateur et cliquez sur l’icône
+  d’installation dans la barre d’adresse : l’agenda devient une
+  application de bureau, qui marche aussi sans Internet.
+
+
+BON À SAVOIR
+  - Téléphone et ordinateur ont chacun leur agenda. Pour copier vos
+    activités de l’un à l’autre : « Sauvegarder mon agenda » sur le
+    premier, puis « Restaurer une sauvegarde » sur le second.
+  - Sur l’ordinateur, les rappels sonnent quand l’application est
+    ouverte (même réduite). Gardez-la ouverte pendant la journée.
+  - Les rappels Android sont programmés pour les 30 prochains jours.
+    Ouvrez l’application au moins une fois par mois pour que les
+    activités répétées continuent de sonner.
+  - Certains téléphones (Tecno, Infinix, Itel, Xiaomi, Huawei…)
+    coupent les applications pour économiser la batterie. Dans
+    Réglages > Batterie, mettez « Mon agenda » en « Pas de restriction ».
+  - Pour une mise à jour : modifiez un fichier sur GitHub. La version
+    ordinateur se met à jour seule, et une nouvelle application Android
+    est construite ; installez-la par-dessus l’ancienne,
+    vos activités sont conservées. Faites quand même une sauvegarde
+    avant (« Sauvegarder mon agenda »).
+  - Ne supprimez jamais le fichier signature/debug.keystore : sans lui,
+    les mises à jour ne pourraient plus s’installer par-dessus.
+
+AVEC ANDROID STUDIO (option pour les plus à l’aise)
+  npm install
+  npx cap add android
+  npx cap sync android
+  npx cap open android      puis « Run » dans Android Studio.

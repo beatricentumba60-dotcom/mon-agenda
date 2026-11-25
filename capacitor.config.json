@@ -1,0 +1,10 @@
+{
+  "appId": "com.monagenda.app",
+  "appName": "Mon agenda",
+  "webDir": "www",
+  "plugins": {
+    "LocalNotifications": {
+      "iconColor": "#E9A31B"
+    }
+  }
+}
