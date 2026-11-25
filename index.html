@@ -120,6 +120,8 @@ dialog::backdrop{background:rgba(10,16,22,.55)}
 .btn{height:46px;padding:0 18px;border-radius:12px;border:1px solid var(--line);background:var(--surface);font-weight:700}
 .btn.primary{background:var(--ink);color:var(--bg);border-color:var(--ink);margin-left:auto}
 .btn.danger{color:var(--danger)}
+.form p{margin:0 0 10px}
+.form a{color:var(--teal);font-weight:700}
 .err{color:var(--danger);font-size:.88rem;min-height:1.2em;margin:0}
 
 /* Alerte de rappel */
@@ -152,6 +154,7 @@ dialog::backdrop{background:rgba(10,16,22,.55)}
     </div>
     <div class="status">
       <span id="syncStatus">Enregistré sur cet appareil</span>
+      <button class="linkbtn" id="syncBtn">Synchronisation</button>
       <button class="linkbtn" id="exportBtn">Sauvegarder mon agenda</button>
       <button class="linkbtn" id="importBtn">Restaurer une sauvegarde</button>
       <input type="file" id="importFile" accept="application/json,.json" hidden>
@@ -236,6 +239,33 @@ dialog::backdrop{background:rgba(10,16,22,.55)}
   </form>
 </dialog>
 
+<dialog id="syncDlg">
+  <div class="form">
+    <h2>Synchronisation</h2>
+    <div id="syncOff">
+      <p>Pour retrouver le même agenda sur le téléphone et l’ordinateur, l’application l’enregistre dans un fichier privé de votre compte GitHub.</p>
+      <p>1. Créez une clé d’accès sur GitHub (une seule fois) :<br>
+      <a id="tokenLink" href="https://github.com/settings/tokens/new?scopes=gist&amp;description=Mon%20agenda" target="_blank" rel="noopener">Créer la clé sur GitHub</a></p>
+      <p>2. Collez-la ici, puis faites de même avec la même clé sur votre autre appareil.</p>
+      <div class="field">
+        <label for="tokenInput">Clé d’accès GitHub</label>
+        <input id="tokenInput" type="password" autocomplete="off" spellcheck="false" placeholder="ghp_…">
+      </div>
+    </div>
+    <div id="syncOn" hidden>
+      <p id="syncInfo"></p>
+      <p class="meta" style="color:var(--muted);font-size:.9rem">La synchronisation se fait toute seule à chaque modification, à l’ouverture de l’application et toutes les 2 minutes.</p>
+    </div>
+    <p class="err" id="syncErr"></p>
+    <div class="actions">
+      <button type="button" class="btn danger" id="syncDisconnect" hidden>Déconnecter</button>
+      <button type="button" class="btn" id="syncClose">Fermer</button>
+      <button type="button" class="btn primary" id="syncConnect">Connecter</button>
+      <button type="button" class="btn primary" id="syncNowBtn" hidden>Synchroniser maintenant</button>
+    </div>
+  </div>
+</dialog>
+
 <div class="alarm" id="alarm" role="alertdialog" aria-modal="true" aria-labelledby="alarmWhat">
   <div class="box">
     <p id="alarmLbl">Rappel</p>
@@ -290,10 +320,12 @@ function itemsOn(dateStr){
 const isDone = (ev,dateStr) => !!(ev.done && ev.done[dateStr]);
 
 /* ---------- Stockage ---------- */
-const state = { events:[], view:"jour", dayCursor:ymd(new Date()), weekCursor:startOfWeek(new Date()), editing:null };
+const state = { events:[], tombs:{}, view:"jour", dayCursor:ymd(new Date()), weekCursor:startOfWeek(new Date()), editing:null };
 
 function loadLocal(){ try{ const r=localStorage.getItem(LS_KEY); return r?JSON.parse(r):[]; }catch(e){ return []; } }
-function saveLocal(){ try{ localStorage.setItem(LS_KEY,JSON.stringify(state.events)); }catch(e){} scheduleNative(); }
+const TOMBS_KEY="agenda-tombs-v1";
+function loadTombs(){ try{ const t=JSON.parse(localStorage.getItem(TOMBS_KEY)||"{}"); return (t&&typeof t==="object")?t:{}; }catch(e){ return {}; } }
+function saveLocal(){ try{ localStorage.setItem(LS_KEY,JSON.stringify(state.events)); localStorage.setItem(TOMBS_KEY,JSON.stringify(state.tombs)); }catch(e){} scheduleNative(); }
 function loadFired(){ try{ return new Set(JSON.parse(localStorage.getItem(FIRED_KEY)||"[]")); }catch(e){ return new Set(); } }
 const fired = loadFired();
 function saveFired(){ try{ localStorage.setItem(FIRED_KEY,JSON.stringify([...fired].slice(-300))); }catch(e){} }
@@ -306,11 +338,12 @@ function sanitize(raw,id){
     remind:Number.isFinite(+raw.remind)?+raw.remind:-1,
     repeat:["none","daily","weekdays","weekly"].includes(raw.repeat)?raw.repeat:"none",
     note:String(raw.note||"").slice(0,500),
-    done:(raw.done&&typeof raw.done==="object")?{...raw.done}:{} };
+    done:(raw.done&&typeof raw.done==="object")?{...raw.done}:{},
+    updated:Number.isFinite(+raw.updated)?+raw.updated:0 };
 }
 
-async function persist(){ saveLocal(); }
-async function removeStored(){ saveLocal(); }
+async function persist(){ saveLocal(); syncSoon(); }
+async function removeStored(){ saveLocal(); syncSoon(); }
 
 /* ---------- Rendu ---------- */
 function renderHero(){
@@ -418,7 +451,7 @@ function route(){
 /* ---------- Actions ---------- */
 async function toggleDone(id,ds,val){
   const ev=state.events.find(e=>e.id===id); if(!ev) return;
-  ev.done={...ev.done}; if(val) ev.done[ds]=true; else delete ev.done[ds];
+  ev.done={...ev.done}; if(val) ev.done[ds]=true; else delete ev.done[ds]; ev.updated=Date.now();
   renderAll(); await persist(ev);
 }
 
@@ -445,7 +478,7 @@ $("form").addEventListener("submit",async e=>{
   const old=state.events.find(x=>x.id===state.editing);
   const ev={ id: old?old.id:"e"+Date.now().toString(36)+Math.random().toString(36).slice(2,6),
     title, date:$("fDate").value, time:$("fTime").value, remind:+$("fRemind").value,
-    repeat:$("fRepeat").value, note:$("fNote").value.trim(), done: old?{...old.done}:{} };
+    repeat:$("fRepeat").value, note:$("fNote").value.trim(), done: old?{...old.done}:{}, updated:Date.now() };
   if(old){ state.events=state.events.map(x=>x.id===ev.id?ev:x); [...fired].forEach(k=>{ if(k.startsWith(ev.id+"|")) fired.delete(k); }); saveFired(); }
   else state.events.push(ev);
   $("dlg").close(); state.dayCursor=ev.date; renderAll();
@@ -457,7 +490,7 @@ $("fCancel").addEventListener("click",()=>$("dlg").close());
 $("fDelete").addEventListener("click",async()=>{
   const id=state.editing; if(!id) return;
   if(!confirm("Supprimer cette activité ? Les répétitions seront aussi supprimées.")) return;
-  state.events=state.events.filter(x=>x.id!==id);
+  state.events=state.events.filter(x=>x.id!==id); state.tombs[id]=Date.now();
   $("dlg").close(); renderAll(); toast("Activité supprimée");
   await removeStored(id);
 });
@@ -611,19 +644,150 @@ $("importFile").addEventListener("change",async e=>{
     const data=JSON.parse(await f.text());
     const list=(Array.isArray(data)?data:data.events||[]).map(x=>sanitize(x)).filter(Boolean);
     if(!list.length){ toast("Ce fichier ne contient aucune activité."); return; }
-    const byId=new Map(state.events.map(x=>[x.id,x])); list.forEach(x=>byId.set(x.id,x));
-    state.events=[...byId.values()]; saveLocal(); renderAll();
+    const byId=new Map(state.events.map(x=>[x.id,x])); const now=Date.now(); list.forEach(x=>{ x.updated=now; delete state.tombs[x.id]; byId.set(x.id,x); });
+    state.events=[...byId.values()]; saveLocal(); renderAll(); syncSoon();
     toast(list.length+" activité(s) restaurée(s)");
   }catch(err){ toast("Fichier illisible : choisissez une sauvegarde de Mon agenda."); }
+});
+
+
+/* ---------- Synchronisation via GitHub (Gist secret) ---------- */
+const SYNC_KEY="agenda-sync-v1", GIST_FILE="mon-agenda.json", API="https://api.github.com";
+let sync=(()=>{ try{ return JSON.parse(localStorage.getItem(SYNC_KEY)||"null"); }catch(e){ return null; } })();
+function saveSync(){ try{ if(sync) localStorage.setItem(SYNC_KEY,JSON.stringify(sync)); else localStorage.removeItem(SYNC_KEY); }catch(e){} }
+let syncing=false, syncAgain=false, syncTimer=null, lastSyncOk=null, syncProblem="";
+
+async function gh(path,opts){
+  const res=await fetch(API+path,Object.assign({},opts,{cache:"no-store",headers:Object.assign({
+    "Accept":"application/vnd.github+json","Authorization":"Bearer "+sync.token,"X-GitHub-Api-Version":"2022-11-28"},
+    opts&&opts.body?{"Content-Type":"application/json"}:{})}));
+  if(res.status===401) throw {kind:"auth"};
+  if(res.status===404) throw {kind:"missing"};
+  if(!res.ok) throw {kind:"http",status:res.status};
+  return res.json();
+}
+function payload(){ return JSON.stringify({app:"mon-agenda",version:2,events:state.events,tombs:state.tombs}); }
+async function readGist(){
+  const g=await gh("/gists/"+sync.gistId);
+  const f=g.files&&g.files[GIST_FILE];
+  if(!f) return {events:[],tombs:{}};
+  let txt=f.content;
+  if(f.truncated && f.raw_url){ txt=await (await fetch(f.raw_url,{cache:"no-store"})).text(); }
+  try{ const d=JSON.parse(txt||"{}"); return {events:Array.isArray(d.events)?d.events:[], tombs:(d.tombs&&typeof d.tombs==="object")?d.tombs:{}}; }
+  catch(e){ return {events:[],tombs:{}}; }
+}
+function mergeData(remote){
+  const tombs={...state.tombs};
+  for(const [id,t] of Object.entries(remote.tombs)){ if(+t>(+tombs[id]||0)) tombs[id]=+t; }
+  const byId=new Map();
+  for(const ev of state.events) byId.set(ev.id,ev);
+  for(const raw of remote.events){
+    const ev=sanitize(raw); if(!ev) continue;
+    const cur=byId.get(ev.id);
+    if(!cur || ev.updated>cur.updated) byId.set(ev.id,ev);
+  }
+  const events=[...byId.values()].filter(ev=>!(tombs[ev.id] && tombs[ev.id]>=ev.updated));
+  // On oublie les suppressions de plus de 90 jours.
+  const limit=Date.now()-90*864e5;
+  for(const id of Object.keys(tombs)) if(tombs[id]<limit) delete tombs[id];
+  return {events,tombs};
+}
+async function findOrCreateGist(){
+  for(let page=1;page<=5;page++){
+    const list=await gh("/gists?per_page=100&page="+page);
+    const hit=list.find(g=>g.files&&g.files[GIST_FILE]);
+    if(hit) return hit.id;
+    if(list.length<100) break;
+  }
+  const g=await gh("/gists",{method:"POST",body:JSON.stringify({description:"Mon agenda (synchronisation)",public:false,files:{[GIST_FILE]:{content:payload()}}})});
+  return g.id;
+}
+async function syncNow(){
+  if(!sync||!sync.token) return;
+  if(syncing){ syncAgain=true; return; }
+  if(navigator.onLine===false){ syncProblem="offline"; refreshSyncStatus(); return; }
+  syncing=true; syncProblem=""; refreshSyncStatus();
+  try{
+    if(!sync.gistId){ sync.gistId=await findOrCreateGist(); saveSync(); }
+    let remote;
+    try{ remote=await readGist(); }
+    catch(e){ if(e&&e.kind==="missing"){ sync.gistId=await findOrCreateGist(); saveSync(); remote=await readGist(); } else throw e; }
+    const before=payload();
+    const merged=mergeData(remote);
+    state.events=merged.events; state.tombs=merged.tombs;
+    const after=payload();
+    const remoteTxt=JSON.stringify({app:"mon-agenda",version:2,events:remote.events.map(x=>sanitize(x)).filter(Boolean),tombs:remote.tombs});
+    if(after!==before){ saveLocal(); renderAll(); }
+    if(after!==remoteTxt){
+      await gh("/gists/"+sync.gistId,{method:"PATCH",body:JSON.stringify({files:{[GIST_FILE]:{content:after}}})});
+    }
+    lastSyncOk=new Date();
+  }catch(e){
+    syncProblem = e&&e.kind==="auth" ? "auth" : (navigator.onLine===false||e instanceof TypeError ? "offline" : "error");
+  }finally{
+    syncing=false; refreshSyncStatus();
+    if(syncAgain){ syncAgain=false; syncSoon(); }
+  }
+}
+function syncSoon(){ if(!sync) return; clearTimeout(syncTimer); syncTimer=setTimeout(syncNow,1500); }
+function refreshSyncStatus(){
+  const el=$("syncStatus");
+  if(!sync){ el.textContent="Enregistré sur cet appareil"; return; }
+  if(syncing){ el.textContent="Synchronisation…"; return; }
+  if(syncProblem==="auth") el.textContent="Synchronisation arrêtée : clé GitHub invalide ou expirée";
+  else if(syncProblem==="offline") el.textContent="Hors ligne : synchronisation au retour d’Internet";
+  else if(syncProblem==="error") el.textContent="Synchronisation impossible pour le moment, nouvel essai bientôt";
+  else if(lastSyncOk) el.textContent="Synchronisé à "+pad(lastSyncOk.getHours())+"h"+pad(lastSyncOk.getMinutes());
+  else el.textContent="Synchronisation activée";
+}
+function openSyncDlg(){
+  $("syncErr").textContent="";
+  const on=!!sync;
+  $("syncOff").hidden=on; $("syncOn").hidden=!on;
+  $("syncConnect").hidden=on; $("syncNowBtn").hidden=!on; $("syncDisconnect").hidden=!on;
+  $("syncInfo").textContent = on ? ("Votre agenda est relié à votre compte GitHub. "+$("syncStatus").textContent+".") : "";
+  $("tokenInput").value="";
+  $("syncDlg").showModal();
+}
+$("syncBtn").addEventListener("click",openSyncDlg);
+$("syncClose").addEventListener("click",()=>$("syncDlg").close());
+$("tokenLink").addEventListener("click",e=>{
+  // Dans l’appli Android, ouvrir le lien dans le navigateur du téléphone.
+  if(isNative){ e.preventDefault(); location.href=$("tokenLink").href; }
+});
+$("syncConnect").addEventListener("click",async()=>{
+  const token=$("tokenInput").value.trim();
+  if(!token){ $("syncErr").textContent="Collez d’abord la clé créée sur GitHub."; return; }
+  $("syncErr").textContent="Connexion…"; $("syncConnect").disabled=true;
+  const prev=sync; sync={token, gistId:null};
+  try{
+    await gh("/user");
+    sync.gistId=await findOrCreateGist(); saveSync();
+    $("syncDlg").close(); toast("Synchronisation activée");
+    await syncNow();
+  }catch(e){
+    sync=prev;
+    $("syncErr").textContent = e&&e.kind==="auth" ? "Clé refusée par GitHub. Vérifiez qu’elle est complète et que la case « gist » était cochée."
+      : "Connexion impossible. Vérifiez votre accès à Internet puis réessayez.";
+  }finally{ $("syncConnect").disabled=false; refreshSyncStatus(); }
+});
+$("syncNowBtn").addEventListener("click",async()=>{ await syncNow(); openSyncDlg(); });
+$("syncDisconnect").addEventListener("click",()=>{
+  if(!confirm("Déconnecter la synchronisation sur cet appareil ? Vos activités restent sur l’appareil et sur GitHub.")) return;
+  sync=null; saveSync(); lastSyncOk=null; syncProblem=""; refreshSyncStatus(); $("syncDlg").close(); toast("Synchronisation désactivée");
 });
 
 /* ---------- Démarrage ---------- */
 if("serviceWorker" in navigator && !isNative){ window.addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{})); }
 state.events=loadLocal().map(e=>sanitize(e)).filter(Boolean);
+state.tombs=loadTombs();
 route();
 checkReminders();
 setInterval(()=>{ checkReminders(); renderHero(); if(state.view==="jour") renderDay(); },20000);
-document.addEventListener("visibilitychange",()=>{ if(!document.hidden){ checkReminders(); renderAll(); scheduleNative(); } });
+document.addEventListener("visibilitychange",()=>{ if(!document.hidden){ checkReminders(); renderAll(); scheduleNative(); syncNow(); } });
+window.addEventListener("online",()=>syncNow());
+setInterval(()=>{ if(!document.hidden) syncNow(); },120000);
+refreshSyncStatus(); syncNow();
 scheduleNative();
 
 var toastTimer=null;
